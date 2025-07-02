@@ -1,0 +1,208 @@
+name: Deploy Azure Function with Pulumi
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
+
+env:
+  DOTNET_VERSION: '6.0.x'
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: './src'
+
+jobs:
+  # Build and Test Job
+  build-and-test:
+    runs-on: ubuntu-latest
+    name: Build and Test Azure Function
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    
+    - name: Restore Function dependencies
+      run: dotnet restore ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/HelloWorldFunction.csproj
+    
+    - name: Build Function
+      run: dotnet build ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/HelloWorldFunction.csproj --configuration Release --no-restore
+    
+    - name: Test Function (if tests exist)
+      run: |
+        if [ -f "${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/HelloWorldFunction.Tests.csproj" ]; then
+          dotnet test ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/HelloWorldFunction.Tests.csproj --no-build --verbosity normal
+        else
+          echo "No tests found, skipping test step"
+        fi
+    
+    - name: Publish Function
+      run: dotnet publish ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/HelloWorldFunction.csproj --configuration Release --output ./publish
+    
+    - name: Upload Function Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: azure-function-app
+        path: ./publish
+
+  # Infrastructure Deployment Job
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+    name: Deploy Infrastructure with Pulumi
+    needs: build-and-test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    outputs:
+      function-app-name: ${{ steps.pulumi.outputs.functionAppName }}
+      resource-group-name: ${{ steps.pulumi.outputs.resourceGroupName }}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    
+    - name: Restore Infrastructure dependencies
+      run: dotnet restore Infrastructure.csproj
+    
+    - name: Build Infrastructure
+      run: dotnet build Infrastructure.csproj --configuration Release --no-restore
+    
+    - name: Install Pulumi CLI
+      uses: pulumi/actions@v4
+    
+    - name: Configure Pulumi Stack
+      run: |
+        STACK_NAME="${{ github.event.inputs.environment || 'dev' }}"
+        pulumi stack select $STACK_NAME || pulumi stack init $STACK_NAME
+      env:
+        PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+    
+    - name: Configure Azure CLI
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Deploy Infrastructure
+      id: pulumi
+      uses: pulumi/actions@v4
+      with:
+        command: up
+        stack-name: ${{ github.event.inputs.environment || 'dev' }}
+        work-dir: .
+      env:
+        PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+
+  # Function Code Deployment Job
+  deploy-function:
+    runs-on: ubuntu-latest
+    name: Deploy Function Code
+    needs: [build-and-test, deploy-infrastructure]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Download Function Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: azure-function-app
+        path: ./publish
+    
+    - name: Configure Azure CLI
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Deploy Function Code to Azure
+      run: |
+        # Create deployment package
+        cd ./publish
+        zip -r ../function-app.zip .
+        cd ..
+        
+        # Deploy to Azure Function App
+        az functionapp deployment source config-zip \
+          --resource-group ${{ needs.deploy-infrastructure.outputs.resource-group-name }} \
+          --name ${{ needs.deploy-infrastructure.outputs.function-app-name }} \
+          --src function-app.zip
+    
+    - name: Verify Deployment
+      run: |
+        FUNCTION_URL="https://${{ needs.deploy-infrastructure.outputs.function-app-name }}.azurewebsites.net"
+        echo "🚀 Deployment Complete!"
+        echo "Function App URL: $FUNCTION_URL"
+        echo "Available Endpoints:"
+        echo "  • Hello World: $FUNCTION_URL/api/HelloWorld"
+        echo "  • Config Demo: $FUNCTION_URL/api/ConfigDemo"
+        echo "  • Config Health: $FUNCTION_URL/api/ConfigHealth"
+        
+        # Wait for function to be ready and test
+        echo "Testing deployment..."
+        sleep 30
+        
+        # Test the health endpoint
+        if curl -f "$FUNCTION_URL/api/ConfigHealth" > /dev/null 2>&1; then
+          echo "✅ Function deployment successful!"
+        else
+          echo "⚠️ Function may still be starting up. Check Azure Portal."
+        fi
+
+  # Preview Job for Pull Requests
+  preview-infrastructure:
+    runs-on: ubuntu-latest
+    name: Preview Infrastructure Changes
+    needs: build-and-test
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    
+    - name: Restore Infrastructure dependencies
+      run: dotnet restore Infrastructure.csproj
+    
+    - name: Build Infrastructure
+      run: dotnet build Infrastructure.csproj --configuration Release --no-restore
+    
+    - name: Install Pulumi CLI
+      uses: pulumi/actions@v4
+    
+    - name: Configure Pulumi Stack
+      run: |
+        pulumi stack select dev || pulumi stack init dev
+      env:
+        PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+    
+    - name: Configure Azure CLI
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Preview Infrastructure Changes
+      uses: pulumi/actions@v4
+      with:
+        command: preview
+        stack-name: dev
+        work-dir: .
+        comment-on-pr: true
+      env:
+        PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 

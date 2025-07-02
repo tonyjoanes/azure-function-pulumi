@@ -1,0 +1,37 @@
+# Pulumi
+/bin/
+/obj/
+Pulumi.*.yaml
+
+# .NET
+src/bin/
+src/obj/
+src/publish/
+*.user
+*.suo
+*.cache
+*.docstates
+*.tmp
+
+# Azure Function
+src/local.settings.json
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vs/
+.vscode/
+*.swp
+*.swo
+
+# GitHub Actions
+.github/artifacts/
+
+# Deployment packages
+*.zip
+publish/
