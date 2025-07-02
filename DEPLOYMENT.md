@@ -28,10 +28,10 @@ This project uses GitHub Actions for CI/CD deployment of the Azure Function with
 az login
 
 # Create service principal
-az ad sp create-for-rbac \
-  --name "azure-function-pulumi-gh" \
-  --role "Contributor" \
-  --scopes "/subscriptions/YOUR_SUBSCRIPTION_ID" \
+az ad sp create-for-rbac `
+  --name "azure-function-pulumi-gh" `
+  --role "Contributor" `
+  --scopes "/subscriptions/6b2914e3-c249-4fc5-9d67-be6d8abdbb66" `
   --sdk-auth
 ```
 
