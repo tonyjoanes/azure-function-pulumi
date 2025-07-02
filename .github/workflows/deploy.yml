@@ -78,10 +78,10 @@ jobs:
         dotnet-version: ${{ env.DOTNET_VERSION }}
     
     - name: Restore Infrastructure dependencies
-      run: dotnet restore Infrastructure.csproj
+      run: dotnet restore infrastructure/Infrastructure.csproj
     
     - name: Build Infrastructure
-      run: dotnet build Infrastructure.csproj --configuration Release --no-restore
+      run: dotnet build infrastructure/Infrastructure.csproj --configuration Release --no-restore
     
     - name: Install Pulumi CLI
       uses: pulumi/actions@v4
@@ -101,6 +101,7 @@ jobs:
     - name: Deploy Infrastructure
       id: pulumi
       run: |
+        cd infrastructure
         pulumi stack select ${{ github.event.inputs.environment || 'dev' }} || pulumi stack init ${{ github.event.inputs.environment || 'dev' }}
         dotnet build Infrastructure.csproj --configuration Release
         pulumi up --yes --stack ${{ github.event.inputs.environment || 'dev' }}
@@ -183,10 +184,10 @@ jobs:
         dotnet-version: ${{ env.DOTNET_VERSION }}
     
     - name: Restore Infrastructure dependencies
-      run: dotnet restore Infrastructure.csproj
+      run: dotnet restore infrastructure/Infrastructure.csproj
     
     - name: Build Infrastructure
-      run: dotnet build Infrastructure.csproj --configuration Release --no-restore
+      run: dotnet build infrastructure/Infrastructure.csproj --configuration Release --no-restore
     
     - name: Install Pulumi CLI
       uses: pulumi/actions@v4
@@ -204,6 +205,7 @@ jobs:
     
     - name: Preview Infrastructure Changes
       run: |
+        cd infrastructure
         pulumi stack select dev || pulumi stack init dev
         dotnet build Infrastructure.csproj --configuration Release
         pulumi preview --stack dev
