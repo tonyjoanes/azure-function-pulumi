@@ -61,14 +61,12 @@ jobs:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
     
     - name: Destroy Infrastructure
-      uses: pulumi/actions@v4
-      with:
-        command: destroy
-        stack-name: ${{ github.event.inputs.environment }}
-        work-dir: .
+      run: |
+        pulumi stack select ${{ github.event.inputs.environment }}
+        dotnet build Infrastructure.csproj --configuration Release
+        pulumi destroy --yes --stack ${{ github.event.inputs.environment }}
       env:
         PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-        PULUMI_DOTNET_PROJECT: Infrastructure.csproj
     
     - name: Confirm Destruction
       run: |
