@@ -51,6 +51,7 @@ jobs:
     
     - name: Configure Pulumi Stack
       run: |
+        cd infrastructure
         pulumi stack select ${{ github.event.inputs.environment }}
       env:
         PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
