@@ -175,18 +175,39 @@ jobs:
           --name ${{ needs.deploy-infrastructure.outputs.function-app-name }} \
           --query "name" --output tsv
         
-        # Create deployment package
+        # List files in publish directory for debugging
+        echo "Files in publish directory:"
+        ls -la ./publish/
+        
+        # Create deployment package - ensure we're in the right directory
+        echo "Creating deployment package..."
         cd ./publish
-        zip -r ../function-app.zip .
+        zip -r ../function-app.zip * .*
         cd ..
         
-        # Deploy to Azure Function App
+        # Verify the zip file was created
+        echo "Zip file contents:"
+        unzip -l function-app.zip | head -20
+        
+        # Deploy to Azure Function App with retries
         echo "Deploying function code..."
-        az functionapp deployment source config-zip \
-          --resource-group ${{ needs.deploy-infrastructure.outputs.resource-group-name }} \
-          --name ${{ needs.deploy-infrastructure.outputs.function-app-name }} \
-          --src function-app.zip \
-          --timeout 600
+        for i in {1..3}; do
+          if az functionapp deployment source config-zip \
+            --resource-group ${{ needs.deploy-infrastructure.outputs.resource-group-name }} \
+            --name ${{ needs.deploy-infrastructure.outputs.function-app-name }} \
+            --src function-app.zip \
+            --timeout 600; then
+            echo "✅ Deployment successful on attempt $i"
+            break
+          else
+            echo "❌ Deployment failed on attempt $i"
+            if [ $i -eq 3 ]; then
+              echo "❌ All deployment attempts failed"
+              exit 1
+            fi
+            sleep 30
+          fi
+        done
     
     - name: Verify Deployment
       run: |
