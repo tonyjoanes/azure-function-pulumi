@@ -111,9 +111,20 @@ jobs:
         dotnet build Infrastructure.csproj --configuration Release
         pulumi up --yes --stack ${{ github.event.inputs.environment || 'dev' }}
         
-        # Export outputs for next job
-        FUNCTION_APP_NAME=$(pulumi stack output functionAppName --stack ${{ github.event.inputs.environment || 'dev' }})
-        RESOURCE_GROUP_NAME=$(pulumi stack output resourceGroupName --stack ${{ github.event.inputs.environment || 'dev' }})
+        # Export outputs for next job with better error handling
+        echo "Getting Pulumi outputs..."
+        FUNCTION_APP_NAME=$(pulumi stack output functionAppName --stack ${{ github.event.inputs.environment || 'dev' }} 2>/dev/null || echo "")
+        RESOURCE_GROUP_NAME=$(pulumi stack output resourceGroupName --stack ${{ github.event.inputs.environment || 'dev' }} 2>/dev/null || echo "")
+        
+        echo "Function App Name: $FUNCTION_APP_NAME"
+        echo "Resource Group Name: $RESOURCE_GROUP_NAME"
+        
+        if [ -z "$FUNCTION_APP_NAME" ] || [ -z "$RESOURCE_GROUP_NAME" ]; then
+          echo "ERROR: Failed to get Pulumi outputs"
+          echo "Available outputs:"
+          pulumi stack output --stack ${{ github.event.inputs.environment || 'dev' }}
+          exit 1
+        fi
         
         echo "functionAppName=$FUNCTION_APP_NAME" >> $GITHUB_OUTPUT
         echo "resourceGroupName=$RESOURCE_GROUP_NAME" >> $GITHUB_OUTPUT
@@ -143,18 +154,39 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
     
+    - name: Debug Resource Group Contents
+      run: |
+        echo "Listing all resources in resource group..."
+        az resource list \
+          --resource-group ${{ needs.deploy-infrastructure.outputs.resource-group-name }} \
+          --query "[].{Name:name, Type:type, Kind:kind}" \
+          --output table
+    
     - name: Deploy Function Code to Azure
       run: |
+        # Verify inputs
+        echo "Resource Group: ${{ needs.deploy-infrastructure.outputs.resource-group-name }}"
+        echo "Function App Name: ${{ needs.deploy-infrastructure.outputs.function-app-name }}"
+        
+        # Check if Function App exists
+        echo "Verifying Function App exists..."
+        az functionapp show \
+          --resource-group ${{ needs.deploy-infrastructure.outputs.resource-group-name }} \
+          --name ${{ needs.deploy-infrastructure.outputs.function-app-name }} \
+          --query "name" --output tsv
+        
         # Create deployment package
         cd ./publish
         zip -r ../function-app.zip .
         cd ..
         
         # Deploy to Azure Function App
+        echo "Deploying function code..."
         az functionapp deployment source config-zip \
           --resource-group ${{ needs.deploy-infrastructure.outputs.resource-group-name }} \
           --name ${{ needs.deploy-infrastructure.outputs.function-app-name }} \
-          --src function-app.zip
+          --src function-app.zip \
+          --timeout 600
     
     - name: Verify Deployment
       run: |
