@@ -1,7 +1,7 @@
 # Azure Function with Pulumi Infrastructure
 
-![Build and Deploy](https://github.com/tonyjoanes/azure-function-pulumi/workflows/Deploy%20to%20Azure/badge.svg)
-![.NET](https://img.shields.io/badge/.NET-6.0-blue.svg)
+![Build and Deploy](https://github.com/tonyjoanes/azure-function-pulumi/workflows/Deploy%20Azure%20Function%20with%20Pulumi/badge.svg)
+![.NET](https://img.shields.io/badge/.NET-8.0-blue.svg)
 ![Azure Functions](https://img.shields.io/badge/Azure%20Functions-v4-orange.svg)
 ![Pulumi](https://img.shields.io/badge/Pulumi-C%23-purple.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
