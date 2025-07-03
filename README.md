@@ -254,19 +254,33 @@ env:
 
 **Important**: Azure Functions **cannot run on Free (F1) or Shared plans** - they require minimum Y1 or B1.
 
-**Solution**: Request quota increase in Azure Portal:
-1. Go to Azure Portal → Subscriptions → Usage + quotas
-2. Search for "Dynamic VMs" and request increase to 10+
-3. If denied, try Basic VMs quota increase instead
+**Quick Solutions**:
 
-**Alternative**: Use Basic tier if Consumption fails:
+**Option A: Try Different Region**
+```bash
+# Test regions with quota helper script
+.\test-regions.ps1
+
+# Set region for current stack
+cd infrastructure
+pulumi config set location "West US 2"
+pulumi up
+```
+
+**Option B: Switch to Basic Plan** (current default)
 ```csharp
 Sku = new SkuDescriptionArgs
 {
-    Name = "B1", // Basic tier (~$13/month)
+    Name = "B1", // Basic tier (~$13/month, different quota pool)
     Tier = "Basic",
 }
 ```
+
+**Option C: Request Quota Increase**
+1. Go to Azure Portal → Subscriptions → Usage + quotas
+2. Search for "Dynamic VMs" and request increase to 10+
+3. If denied, try "Basic VMs" quota increase instead
+4. Approval usually takes 24 hours
 
 #### **4. Application Insights Configuration**
 **Problem**: "Cannot set LogAnalytics as IngestionMode without WorkspaceResourceId"
@@ -369,18 +383,43 @@ curl https://azure-function-pulumi-dev-func.azurewebsites.net/api/EnvironmentDem
 
 This project supports separate environments with isolated Azure resources:
 
-| Environment | Trigger | Azure Resources |
-|-------------|---------|-----------------|
-| **Dev** | Push to `main` | `azure-function-pulumi-dev-*` |
-| **Staging** | Pull Request | `azure-function-pulumi-staging-*` |
-| **Prod** | Manual workflow dispatch | `azure-function-pulumi-prod-*` |
+| Environment | Trigger | Azure Resources | Default Region |
+|-------------|---------|-----------------|----------------|
+| **Dev** | Push to `main` | `azure-function-pulumi-dev-*` | East US |
+| **Staging** | Pull Request | `azure-function-pulumi-staging-*` | West US 2 |
+| **Prod** | Manual workflow dispatch | `azure-function-pulumi-prod-*` | Central US |
 
 Each environment has its own:
 - Resource Group
-- Function App
+- Function App  
 - Storage Account
 - Application Insights
 - Configuration values
+- **Azure Region** (configurable per environment)
+
+### 🌎 Regional Configuration
+
+**Override region for any environment:**
+```bash
+cd infrastructure
+
+# Set region for specific stack
+pulumi stack select dev
+pulumi config set location "West Europe"
+
+# Deploy to new region
+pulumi up
+```
+
+**Test different regions for quota:**
+```bash
+# Use helper script to find regions with available quota
+.\test-regions.ps1
+
+# Try the recommended region
+pulumi config set location "West US 2"
+pulumi up --dry-run  # Test first
+```
 
 ## 🔧 Local Development
 

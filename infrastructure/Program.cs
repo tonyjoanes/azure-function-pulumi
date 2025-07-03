@@ -6,10 +6,24 @@ using Pulumi.AzureNative.Web;
 
 return await Pulumi.Deployment.RunAsync(() =>
 {
+    // Get configuration (allows region override per environment)
+    var config = new Pulumi.Config();
+    var stackName = Pulumi.Deployment.Instance.StackName;
+    var location = config.Get("location") ?? GetDefaultLocationForStack(stackName);
+    
+    // Helper function for environment-specific defaults
+    static string GetDefaultLocationForStack(string stackName) => stackName switch
+    {
+        "dev" => "East US",
+        "staging" => "West US 2", 
+        "prod" => "Central US",
+        _ => "East US"
+    };
+    
     // Create a Resource Group
     var resourceGroup = new ResourceGroup(
         "azure-function-rg",
-        new ResourceGroupArgs { Location = "East US" }
+        new ResourceGroupArgs { Location = location }
     );
 
     // Create a Storage Account (required for Azure Functions)
@@ -53,10 +67,10 @@ return await Pulumi.Deployment.RunAsync(() =>
         }
     );
 
-    // Create App Service Plan (Consumption Plan for serverless Azure Functions)
-    // NOTE: Azure Functions require at least Y1 (Consumption) or B1 (Basic) - Free tier NOT supported
-    // If you get quota errors, request "Dynamic VMs" quota increase in Azure Portal
-    // Alternative: Use B1 Basic plan if Y1 fails (requires "Basic VMs" quota)
+    // Create App Service Plan (Basic Plan - trying to avoid Dynamic VM quota issues)
+    // NOTE: Trying B1 Basic first since subscription has 0 Dynamic VM quota
+    // Basic plan: ~$13/month but more predictable than quota requests
+    // To switch back to Consumption (Y1): requires Dynamic VMs quota increase
     var appServicePlan = new AppServicePlan(
         "azure-function-plan",
         new AppServicePlanArgs
@@ -65,8 +79,8 @@ return await Pulumi.Deployment.RunAsync(() =>
             Location = resourceGroup.Location,
             Sku = new Pulumi.AzureNative.Web.Inputs.SkuDescriptionArgs
             {
-                Name = "Y1", // Consumption plan (serverless, pay-per-execution)
-                Tier = "Dynamic",
+                Name = "B1", // Basic plan (may have different quota pool)
+                Tier = "Basic",
             },
             Kind = "FunctionApp",
         }
