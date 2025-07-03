@@ -1,164 +1,265 @@
+using System.Collections.Generic;
 using Pulumi;
 using Pulumi.AzureNative.Insights;
 using Pulumi.AzureNative.Resources;
 using Pulumi.AzureNative.Storage;
 using Pulumi.AzureNative.Web;
+using Pulumi.AzureNative.Web.Inputs;
 
 return await Pulumi.Deployment.RunAsync(() =>
 {
-    // Get configuration (allows region override per environment)
-    var config = new Pulumi.Config();
-    var stackName = Pulumi.Deployment.Instance.StackName;
-    var location = config.Get("location") ?? GetDefaultLocationForStack(stackName);
-    
-    // Helper function for environment-specific defaults
-    static string GetDefaultLocationForStack(string stackName) => stackName switch
+    var config = new Config();
+    var location = config.Get("location") ?? "East US";
+    var environment = config.Get("environment") ?? "dev";
+    var welcomeMessage = config.Get("welcomeMessage") ?? $"Hello from {environment.ToUpper()} environment!";
+
+    // Create a resource group
+    var resourceGroup = new ResourceGroup("rg", new ResourceGroupArgs
     {
-        "dev" => "East US",
-        "staging" => "West US 2", 
-        "prod" => "Central US",
-        _ => "East US"
-    };
-    
-    // Create a Resource Group
-    var resourceGroup = new ResourceGroup(
-        "azure-function-rg",
-        new ResourceGroupArgs { Location = location }
-    );
+        Location = location,
+        ResourceGroupName = $"rg-azure-functions-{environment}"
+    });
 
-    // Create a Storage Account (required for Azure Functions)
-    var storageAccount = new StorageAccount(
-        "azfuncstore",
-        new StorageAccountArgs
+    // Create a storage account (required for Azure Functions)
+    var storageAccount = new StorageAccount("sa", new StorageAccountArgs
+    {
+        ResourceGroupName = resourceGroup.Name,
+        AccountName = $"safunc{environment}{System.Guid.NewGuid().ToString("N")[..8]}",
+        Location = location,
+        Sku = new Pulumi.AzureNative.Storage.Inputs.SkuArgs
         {
-            ResourceGroupName = resourceGroup.Name,
-            Location = resourceGroup.Location,
-            Sku = new Pulumi.AzureNative.Storage.Inputs.SkuArgs { Name = SkuName.Standard_LRS },
-            Kind = Pulumi.AzureNative.Storage.Kind.StorageV2,
-        }
-    );
-
-    // Get the storage account keys
-    var storageAccountKeys = ListStorageAccountKeys.Invoke(
-        new ListStorageAccountKeysInvokeArgs
-        {
-            ResourceGroupName = resourceGroup.Name,
-            AccountName = storageAccount.Name,
-        }
-    );
-
-    var primaryStorageKey = storageAccountKeys.Apply(keys => keys.Keys[0].Value);
-
-    // Create storage connection string
-    var storageConnectionString = Output.Format(
-        $"DefaultEndpointsProtocol=https;AccountName={storageAccount.Name};AccountKey={primaryStorageKey};EndpointSuffix=core.windows.net"
-    );
+            Name = SkuName.Standard_LRS
+        },
+        Kind = Pulumi.AzureNative.Storage.Kind.StorageV2
+    });
 
     // Create Application Insights
-    var appInsights = new Component(
-        "azure-function-ai",
-        new ComponentArgs
-        {
-            ResourceGroupName = resourceGroup.Name,
-            Location = resourceGroup.Location,
-            ApplicationType = ApplicationType.Web,
-            Kind = "web",
-            IngestionMode = IngestionMode.ApplicationInsights, // Avoid LogAnalytics workspace requirement
-        }
-    );
+    var appInsights = new Component("ai", new ComponentArgs
+    {
+        ResourceGroupName = resourceGroup.Name,
+        ResourceName = $"ai-azure-functions-{environment}",
+        Location = location,
+        ApplicationType = ApplicationType.Web,
+        IngestionMode = IngestionMode.ApplicationInsights, // Fixed: Explicitly set to ApplicationInsights
+        Kind = "web"
+    });
 
-    // Create App Service Plan (Basic Plan - trying to avoid Dynamic VM quota issues)
-    // NOTE: Trying B1 Basic first since subscription has 0 Dynamic VM quota
-    // Basic plan: ~$13/month but more predictable than quota requests
-    // To switch back to Consumption (Y1): requires Dynamic VMs quota increase
-    var appServicePlan = new AppServicePlan(
-        "azure-function-plan",
-        new AppServicePlanArgs
+    // OPTION 1: Traditional Azure Functions (current approach)
+    // Create an App Service Plan
+    var appServicePlan = new AppServicePlan("asp", new AppServicePlanArgs
+    {
+        ResourceGroupName = resourceGroup.Name,
+        Name = $"asp-azure-functions-{environment}",
+        Location = location,
+        Sku = new SkuDescriptionArgs
         {
-            ResourceGroupName = resourceGroup.Name,
-            Location = resourceGroup.Location,
-            Sku = new Pulumi.AzureNative.Web.Inputs.SkuDescriptionArgs
-            {
-                Name = "B1", // Basic plan (may have different quota pool)
-                Tier = "Basic",
-            },
-            Kind = "FunctionApp",
-        }
-    );
+            Name = "B1",  // Basic tier - cheapest paid option
+            Tier = "Basic"
+        },
+        Kind = "functionapp"
+    });
 
     // Create the Function App
-    var functionApp = new WebApp(
-        "azure-function-app",
-        new WebAppArgs
+    var functionApp = new WebApp("func", new WebAppArgs
+    {
+        ResourceGroupName = resourceGroup.Name,
+        Name = $"func-azure-functions-{environment}-{System.Guid.NewGuid().ToString("N")[..8]}",
+        Location = location,
+        ServerFarmId = appServicePlan.Id,
+        Kind = "functionapp",
+        SiteConfig = new SiteConfigArgs
         {
-            ResourceGroupName = resourceGroup.Name,
-            Location = resourceGroup.Location,
-            ServerFarmId = appServicePlan.Id,
-            Kind = "FunctionApp",
-            SiteConfig = new Pulumi.AzureNative.Web.Inputs.SiteConfigArgs
+            AppSettings = new[]
             {
-                AppSettings = new[]
+                new NameValuePairArgs
                 {
-                    new Pulumi.AzureNative.Web.Inputs.NameValuePairArgs
+                    Name = "AzureWebJobsStorage",
+                    Value = Output.Tuple(resourceGroup.Name, storageAccount.Name).Apply(t =>
                     {
-                        Name = "AzureWebJobsStorage",
-                        Value = storageConnectionString,
-                    },
-                    new Pulumi.AzureNative.Web.Inputs.NameValuePairArgs
-                    {
-                        Name = "FUNCTIONS_EXTENSION_VERSION",
-                        Value = "~4",
-                    },
-                    new Pulumi.AzureNative.Web.Inputs.NameValuePairArgs
-                    {
-                        Name = "FUNCTIONS_WORKER_RUNTIME",
-                        Value = "dotnet-isolated",
-                    },
-                    new Pulumi.AzureNative.Web.Inputs.NameValuePairArgs
-                    {
-                        Name = "APPINSIGHTS_INSTRUMENTATIONKEY",
-                        Value = appInsights.InstrumentationKey,
-                    },
-                    new Pulumi.AzureNative.Web.Inputs.NameValuePairArgs
-                    {
-                        Name = "APPLICATIONINSIGHTS_CONNECTION_STRING",
-                        Value = appInsights.ConnectionString,
-                    },
-                    // Your custom application settings
-                    new Pulumi.AzureNative.Web.Inputs.NameValuePairArgs
-                    {
-                        Name = "WelcomeMessage",
-                        Value = "Hello from Azure via Pulumi!",
-                    },
-                    new Pulumi.AzureNative.Web.Inputs.NameValuePairArgs
-                    {
-                        Name = "MaxRetries",
-                        Value = "5",
-                    },
-                    new Pulumi.AzureNative.Web.Inputs.NameValuePairArgs
-                    {
-                        Name = "ApiBaseUrl",
-                        Value = "https://prod-api.example.com",
-                    },
-                    new Pulumi.AzureNative.Web.Inputs.NameValuePairArgs
-                    {
-                        Name = "DatabaseConnectionString",
-                        Value =
-                            "Server=prod-server.database.windows.net;Database=ProdDB;Authentication=Active Directory Default;",
-                    },
+                        var keys = ListStorageAccountKeys.Invoke(new ListStorageAccountKeysInvokeArgs
+                        {
+                            ResourceGroupName = t.Item1,
+                            AccountName = t.Item2
+                        });
+                        return keys.Apply(k => $"DefaultEndpointsProtocol=https;AccountName={t.Item2};AccountKey={k.Keys[0].Value};EndpointSuffix=core.windows.net");
+                    }).Apply(o => o)
                 },
-                NetFrameworkVersion = "v6.0",
-            },
+                new NameValuePairArgs
+                {
+                    Name = "FUNCTIONS_EXTENSION_VERSION",
+                    Value = "~4"
+                },
+                new NameValuePairArgs
+                {
+                    Name = "FUNCTIONS_WORKER_RUNTIME",
+                    Value = "dotnet-isolated"
+                },
+                new NameValuePairArgs
+                {
+                    Name = "APPINSIGHTS_INSTRUMENTATIONKEY",
+                    Value = appInsights.InstrumentationKey
+                },
+                new NameValuePairArgs
+                {
+                    Name = "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                    Value = appInsights.ConnectionString
+                },
+                // Custom application settings
+                new NameValuePairArgs
+                {
+                    Name = "WelcomeMessage",
+                    Value = welcomeMessage
+                },
+                new NameValuePairArgs
+                {
+                    Name = "MaxRetries",
+                    Value = "3"
+                },
+                new NameValuePairArgs
+                {
+                    Name = "ApiBaseUrl",
+                    Value = "https://api.example.com"
+                },
+                new NameValuePairArgs
+                {
+                    Name = "DatabaseConnectionString",
+                    Value = "Server=localhost;Database=MyDb;Trusted_Connection=true;"
+                }
+            }
         }
-    );
+    });
 
-    // Export important values
+    /* OPTION 2: Azure Container Apps (Alternative if quota issues persist)
+    // Uncomment this section if you want to try Container Apps instead
+    
+    using Pulumi.AzureNative.App;
+    using Pulumi.AzureNative.App.Inputs;
+    using Pulumi.AzureNative.OperationalInsights;
+    
+    // Create Log Analytics Workspace for Container Apps
+    var logAnalytics = new Workspace("law", new WorkspaceArgs
+    {
+        ResourceGroupName = resourceGroup.Name,
+        WorkspaceName = $"law-containerapp-{environment}",
+        Location = location,
+        Sku = new WorkspaceSkuArgs
+        {
+            Name = "PerGB2018"
+        }
+    });
+
+    // Create Container Apps Environment
+    var containerEnv = new ManagedEnvironment("cae", new ManagedEnvironmentArgs
+    {
+        ResourceGroupName = resourceGroup.Name,
+        EnvironmentName = $"cae-azure-functions-{environment}",
+        Location = location,
+        AppLogsConfiguration = new AppLogsConfigurationArgs
+        {
+            Destination = "log-analytics",
+            LogAnalyticsConfiguration = new LogAnalyticsConfigurationArgs
+            {
+                CustomerId = logAnalytics.CustomerId,
+                SharedKey = logAnalytics.GetSharedKeys().Apply(keys => keys.PrimarySharedKey)
+            }
+        }
+    });
+
+    // Create Container App (Functions alternative)
+    var containerApp = new ContainerApp("ca", new ContainerAppArgs
+    {
+        ResourceGroupName = resourceGroup.Name,
+        ContainerAppName = $"ca-azure-functions-{environment}",
+        Location = location,
+        ManagedEnvironmentId = containerEnv.Id,
+        Configuration = new ConfigurationArgs
+        {
+            Ingress = new IngressArgs
+            {
+                External = true,
+                TargetPort = 80,
+                Traffic = new[]
+                {
+                    new TrafficWeightArgs
+                    {
+                        Weight = 100,
+                        LatestRevision = true
+                    }
+                }
+            },
+            Secrets = new[]
+            {
+                                 new SecretArgs
+                 {
+                     Name = "storage-connection",
+                     Value = Output.Tuple(resourceGroup.Name, storageAccount.Name).Apply(t =>
+                     {
+                         var keys = ListStorageAccountKeys.Invoke(new ListStorageAccountKeysInvokeArgs
+                         {
+                             ResourceGroupName = t.Item1,
+                             AccountName = t.Item2
+                         });
+                         return keys.Apply(k => $"DefaultEndpointsProtocol=https;AccountName={t.Item2};AccountKey={k.Keys[0].Value};EndpointSuffix=core.windows.net");
+                     }).Apply(o => o)
+                 }
+            }
+        },
+        Template = new TemplateArgs
+        {
+            Containers = new[]
+            {
+                new ContainerArgs
+                {
+                    Name = "azure-functions",
+                    Image = "mcr.microsoft.com/azure-functions/dotnet-isolated:4-dotnet-isolated8.0", // Use official Functions image
+                    Resources = new ContainerResourcesArgs
+                    {
+                        Cpu = 0.25,
+                        Memory = "0.5Gi"
+                    },
+                    Env = new[]
+                    {
+                        new EnvironmentVarArgs
+                        {
+                            Name = "AzureWebJobsStorage",
+                            SecretRef = "storage-connection"
+                        },
+                        new EnvironmentVarArgs
+                        {
+                            Name = "FUNCTIONS_EXTENSION_VERSION",
+                            Value = "~4"
+                        },
+                        new EnvironmentVarArgs
+                        {
+                            Name = "FUNCTIONS_WORKER_RUNTIME",
+                            Value = "dotnet-isolated"
+                        },
+                        new EnvironmentVarArgs
+                        {
+                            Name = "WelcomeMessage",
+                            Value = welcomeMessage
+                        }
+                    }
+                }
+            },
+            Scale = new ScaleArgs
+            {
+                MinReplicas = 0,
+                MaxReplicas = 10
+            }
+        }
+    });
+    */
+
+    // Export the Function App URL
     return new Dictionary<string, object?>
     {
         ["resourceGroupName"] = resourceGroup.Name,
         ["functionAppName"] = functionApp.Name,
         ["functionAppUrl"] = Output.Format($"https://{functionApp.DefaultHostName}"),
         ["storageAccountName"] = storageAccount.Name,
-        ["appInsightsInstrumentationKey"] = appInsights.InstrumentationKey,
+        ["appInsightsName"] = appInsights.Name,
+        ["location"] = location,
+        ["environment"] = environment
     };
 });

@@ -1,54 +1,66 @@
-# Test Different Azure Regions for Quota
-# This script helps you test which regions might have available quota
+# Test different Azure regions for quota availability
+# This script helps you test multiple regions to find one with available quota
 
-Write-Host "🌍 Testing Azure Regions for Function App Deployment" -ForegroundColor Green
-Write-Host "=============================================" -ForegroundColor Green
-
-# Common regions to test (ordered by typical quota availability)
-$regions = @(
-    "West US 2",
-    "West Europe", 
-    "Southeast Asia",
-    "UK South",
-    "Australia East",
-    "Central US",
-    "North Europe",
-    "West US",
-    "East US 2",
-    "East US"
+param(
+    [string]$TestRegion = "West US 2",
+    [string]$Environment = "dev"
 )
 
-Write-Host "💡 Recommended approach:" -ForegroundColor Yellow
-Write-Host "1. Try regions in order below" -ForegroundColor Yellow
-Write-Host "2. Set region config: pulumi config set location `"West US 2`"" -ForegroundColor Yellow
-Write-Host "3. Run deployment: pulumi up" -ForegroundColor Yellow
-Write-Host ""
+Write-Host "🌍 Testing Azure region: $TestRegion" -ForegroundColor Yellow
+Write-Host "📋 Environment: $Environment" -ForegroundColor Yellow
 
-Write-Host "🎯 Regions to try (in order of likely success):" -ForegroundColor Cyan
-for ($i = 0; $i -lt $regions.Length; $i++) {
-    $region = $regions[$i]
-    Write-Host "  $($i + 1). $region" -ForegroundColor White
-    
-    if ($i -eq 0) {
-        Write-Host "     👆 Start with this one (typically has most quota)" -ForegroundColor Green
-    }
+# High-probability regions (often have better quota availability)
+$RegionsToTry = @(
+    "West US 2",
+    "Central US", 
+    "West Europe",
+    "Southeast Asia",
+    "East US 2",
+    "North Central US",
+    "South Central US",
+    "Australia East",
+    "Japan East",
+    "UK South"
+)
+
+Write-Host "`n🎯 Recommended regions to try (in order of success probability):" -ForegroundColor Green
+for ($i = 0; $i -lt $RegionsToTry.Count; $i++) {
+    $status = if ($RegionsToTry[$i] -eq $TestRegion) { "← TESTING NOW" } else { "" }
+    Write-Host "  $($i + 1). $($RegionsToTry[$i]) $status" -ForegroundColor Cyan
 }
 
-Write-Host ""
-Write-Host "🔧 Commands to test a region:" -ForegroundColor Cyan
-Write-Host "  cd infrastructure" -ForegroundColor Gray
-Write-Host "  pulumi config set location `"West US 2`"" -ForegroundColor Gray
-Write-Host "  pulumi up --dry-run  # Test without actually deploying" -ForegroundColor Gray
-Write-Host "  pulumi up            # Deploy if dry-run succeeds" -ForegroundColor Gray
+Write-Host "`n📝 To test a region:" -ForegroundColor Green
+Write-Host "  1. Update Pulumi.dev.yaml with new location" -ForegroundColor White
+Write-Host "  2. Commit and push changes" -ForegroundColor White
+Write-Host "  3. GitHub Actions will attempt deployment" -ForegroundColor White
+Write-Host "  4. Check workflow results" -ForegroundColor White
 
+Write-Host "`n🔧 Quick setup commands:" -ForegroundColor Green
+Write-Host "  # Test West US 2" -ForegroundColor White
+Write-Host "  git add -A && git commit -m 'Test West US 2' && git push" -ForegroundColor Gray
 Write-Host ""
-Write-Host "📊 Check current quota limits:" -ForegroundColor Cyan
-Write-Host "  Azure Portal → Subscriptions → Usage + quotas" -ForegroundColor Gray
-Write-Host "  Search for: 'Dynamic VMs' or 'Basic VMs'" -ForegroundColor Gray
+Write-Host "  # Test Central US" -ForegroundColor White  
+Write-Host "  git add -A && git commit -m 'Test Central US' && git push" -ForegroundColor Gray
 
-Write-Host ""
-Write-Host "🚀 If all regions fail, request quota increase:" -ForegroundColor Yellow
-Write-Host "  1. Azure Portal → Subscriptions → Usage + quotas" -ForegroundColor Gray
-Write-Host "  2. Search 'Dynamic VMs' → Request quota increase" -ForegroundColor Gray
-Write-Host "  3. Request 10+ VMs for your preferred region" -ForegroundColor Gray
-Write-Host "  4. Approval usually takes 24 hours" -ForegroundColor Gray 
+Write-Host "`n✨ Creating Pulumi config for $TestRegion..." -ForegroundColor Yellow
+
+# Create or update Pulumi config
+$pulumiConfig = @"
+config:
+  azure-function-pulumi:location: "$TestRegion"
+  azure-function-pulumi:environment: "$Environment"
+  azure-function-pulumi:welcomeMessage: "Hello from $TestRegion - $Environment environment!"
+"@
+
+$configFile = "Pulumi.$Environment.yaml"
+Set-Content -Path $configFile -Value $pulumiConfig -Encoding UTF8
+
+Write-Host "✅ Created $configFile with location: $TestRegion" -ForegroundColor Green
+Write-Host "`n🚀 Next steps:" -ForegroundColor Yellow
+Write-Host "  1. git add $configFile" -ForegroundColor White
+Write-Host "  2. git commit -m 'Test $TestRegion region'" -ForegroundColor White
+Write-Host "  3. git push" -ForegroundColor White
+Write-Host "  4. Check GitHub Actions workflow" -ForegroundColor White
+
+Write-Host "`n🔍 Monitor deployment at:" -ForegroundColor Yellow
+Write-Host "  https://github.com/YOUR_USERNAME/azure-function-pulumi/actions" -ForegroundColor Cyan 
