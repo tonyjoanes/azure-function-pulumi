@@ -179,15 +179,25 @@ jobs:
         echo "Files in publish directory:"
         ls -la ./publish/
         
-        # Create deployment package - ensure we're in the right directory
+        # Verify critical files exist
+        echo "Checking for critical function files:"
+        echo "✓ host.json: $(ls ./publish/host.json 2>/dev/null && echo "EXISTS" || echo "MISSING")"
+        echo "✓ worker.config.json: $(ls ./publish/worker.config.json 2>/dev/null && echo "EXISTS" || echo "MISSING")"
+        echo "✓ functions.metadata: $(ls ./publish/functions.metadata 2>/dev/null && echo "EXISTS" || echo "MISSING")"
+        echo "✓ HelloWorldFunction.dll: $(ls ./publish/HelloWorldFunction.dll 2>/dev/null && echo "EXISTS" || echo "MISSING")"
+        
+        # Create deployment package - using the method that worked manually
         echo "Creating deployment package..."
         cd ./publish
-        zip -r ../function-app.zip * .*
+        # Package all files (excluding hidden files that might cause issues)
+        zip -r ../function-app.zip * --exclude=".*"
         cd ..
         
-        # Verify the zip file was created
-        echo "Zip file contents:"
-        unzip -l function-app.zip | head -20
+        # Verify the zip file was created and show key contents
+        echo "Zip file size: $(du -h function-app.zip | cut -f1)"
+        echo "Key files in zip:"
+        unzip -l function-app.zip | grep -E "(host\.json|worker\.config\.json|functions\.metadata|HelloWorldFunction\.dll)" || echo "Checking all files..."
+        unzip -l function-app.zip | head -30
         
         # Deploy to Azure Function App with retries
         echo "Deploying function code..."
@@ -218,17 +228,40 @@ jobs:
         echo "  • Hello World: $FUNCTION_URL/api/HelloWorld"
         echo "  • Config Demo: $FUNCTION_URL/api/ConfigDemo"
         echo "  • Config Health: $FUNCTION_URL/api/ConfigHealth"
+        echo "  • Environment Demo: $FUNCTION_URL/api/EnvironmentDemo"
         
         # Wait for function to be ready and test
-        echo "Testing deployment..."
-        sleep 30
+        echo "⏳ Waiting for function app to fully start (60 seconds)..."
+        sleep 60
         
-        # Test the health endpoint
-        if curl -f "$FUNCTION_URL/api/ConfigHealth" > /dev/null 2>&1; then
-          echo "✅ Function deployment successful!"
+        # Test multiple endpoints with retries
+        echo "🧪 Testing endpoints..."
+        
+        # Test health endpoint with retries
+        for i in {1..5}; do
+          echo "🔍 Testing health endpoint (attempt $i/5)..."
+          if curl -f -s "$FUNCTION_URL/api/ConfigHealth" > /dev/null; then
+            echo "✅ Health endpoint responding!"
+            HEALTH_RESPONSE=$(curl -s "$FUNCTION_URL/api/ConfigHealth")
+            echo "Health check response: $HEALTH_RESPONSE"
+            break
+          else
+            echo "⏳ Health endpoint not ready, waiting 15 seconds..."
+            sleep 15
+          fi
+        done
+        
+        # Test hello world endpoint  
+        echo "🔍 Testing Hello World endpoint..."
+        if curl -f -s "$FUNCTION_URL/api/HelloWorld" > /dev/null; then
+          echo "✅ Hello World endpoint responding!"
         else
-          echo "⚠️ Function may still be starting up. Check Azure Portal."
+          echo "⚠️ Hello World endpoint not responding yet"
         fi
+        
+        echo "🎯 Manual verification URLs:"
+        echo "  👉 $FUNCTION_URL/api/HelloWorld"
+        echo "  👉 $FUNCTION_URL/api/ConfigHealth"
 
   # Preview Job for Pull Requests
   preview-infrastructure:
