@@ -49,10 +49,14 @@ return await Pulumi.Deployment.RunAsync(() =>
             Location = resourceGroup.Location,
             ApplicationType = ApplicationType.Web,
             Kind = "web",
+            IngestionMode = IngestionMode.ApplicationInsights, // Avoid LogAnalytics workspace requirement
         }
     );
 
-    // Create App Service Plan (Consumption Plan for serverless)
+    // Create App Service Plan (Basic Plan - avoids Dynamic VM quota issues)
+    // NOTE: Using B1 Basic plan instead of Y1 Consumption plan due to Azure quota limits
+    // To switch back to serverless consumption plan later, change to:
+    // Name = "Y1", Tier = "Dynamic" (requires Dynamic VM quota increase)
     var appServicePlan = new AppServicePlan(
         "azure-function-plan",
         new AppServicePlanArgs
@@ -61,8 +65,8 @@ return await Pulumi.Deployment.RunAsync(() =>
             Location = resourceGroup.Location,
             Sku = new Pulumi.AzureNative.Web.Inputs.SkuDescriptionArgs
             {
-                Name = "Y1", // Consumption plan
-                Tier = "Dynamic",
+                Name = "B1", // Basic plan (~$13/month but avoids quota issues)
+                Tier = "Basic",
             },
             Kind = "FunctionApp",
         }
