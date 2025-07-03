@@ -1,4 +1,4 @@
 config:
-  azure-function-pulumi:location: "Central US"
+  azure-function-pulumi:location: "West US 2"
   azure-function-pulumi:environment: "dev"
-  azure-function-pulumi:welcomeMessage: "Hello from Central US - DEV environment!" 
+  azure-function-pulumi:welcomeMessage: "Hello from West US 2 - DEV environment!" 
