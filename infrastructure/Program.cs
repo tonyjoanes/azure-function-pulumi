@@ -53,10 +53,10 @@ return await Pulumi.Deployment.RunAsync(() =>
         }
     );
 
-    // Create App Service Plan (Free Plan - avoids ALL quota issues)
-    // NOTE: Using F1 Free plan due to Azure subscription quota limits (0 for Dynamic/Basic VMs)
-    // Free tier limitations: 1GB storage, 60 CPU min/day, no custom domains
-    // To upgrade later: F1→B1→Y1 (requires quota increases)
+    // Create App Service Plan (Consumption Plan for serverless Azure Functions)
+    // NOTE: Azure Functions require at least Y1 (Consumption) or B1 (Basic) - Free tier NOT supported
+    // If you get quota errors, request "Dynamic VMs" quota increase in Azure Portal
+    // Alternative: Use B1 Basic plan if Y1 fails (requires "Basic VMs" quota)
     var appServicePlan = new AppServicePlan(
         "azure-function-plan",
         new AppServicePlanArgs
@@ -65,8 +65,8 @@ return await Pulumi.Deployment.RunAsync(() =>
             Location = resourceGroup.Location,
             Sku = new Pulumi.AzureNative.Web.Inputs.SkuDescriptionArgs
             {
-                Name = "F1", // Free plan (no cost, no quota restrictions)
-                Tier = "Free",
+                Name = "Y1", // Consumption plan (serverless, pay-per-execution)
+                Tier = "Dynamic",
             },
             Kind = "FunctionApp",
         }

@@ -252,12 +252,19 @@ env:
 #### **3. Azure Quota Limitations**
 **Problem**: "Current Limit (Dynamic VMs): 0" or "Current Limit (Basic VMs): 0"
 
-**Solution**: Start with Free tier App Service Plan:
+**Important**: Azure Functions **cannot run on Free (F1) or Shared plans** - they require minimum Y1 or B1.
+
+**Solution**: Request quota increase in Azure Portal:
+1. Go to Azure Portal → Subscriptions → Usage + quotas
+2. Search for "Dynamic VMs" and request increase to 10+
+3. If denied, try Basic VMs quota increase instead
+
+**Alternative**: Use Basic tier if Consumption fails:
 ```csharp
 Sku = new SkuDescriptionArgs
 {
-    Name = "F1", // Free tier - no quota restrictions
-    Tier = "Free",
+    Name = "B1", // Basic tier (~$13/month)
+    Tier = "Basic",
 }
 ```
 
@@ -458,10 +465,11 @@ Safe infrastructure cleanup requiring `DESTROY` confirmation:
 ## 🌟 Real-World Considerations
 
 ### **Cost Optimization**
-- **Free Tier**: Start with F1 plan ($0/month) for development
-- **Upgrade Path**: F1 → B1 ($13/month) → Y1 (consumption-based)
+- **Consumption Plan**: Y1 plan (pay-per-execution, can be $0-5/month for light usage)
+- **Basic Plan**: B1 plan (~$13/month) for predictable costs
 - **Resource Cleanup**: Use destroy workflows to avoid unnecessary costs
 - **Monitoring**: Application Insights provides cost insights
+- **Note**: Azure Functions cannot use Free (F1) tier - minimum is Y1 or B1
 
 ### **Security Best Practices**
 - **Service Principal**: Minimal required permissions (Contributor role)
