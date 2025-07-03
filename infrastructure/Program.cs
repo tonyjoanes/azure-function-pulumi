@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Pulumi;
 using Pulumi.AzureNative.Insights;
 using Pulumi.AzureNative.Resources;
@@ -11,123 +10,149 @@ return await Pulumi.Deployment.RunAsync(() =>
     var config = new Config();
     var location = config.Get("location") ?? "East US";
     var environment = config.Get("environment") ?? "dev";
-    var welcomeMessage = config.Get("welcomeMessage") ?? $"Hello from {environment.ToUpper()} environment!";
+    var welcomeMessage =
+        config.Get("welcomeMessage") ?? $"Hello from {environment.ToUpper()} environment!";
 
     // Create a resource group
-    var resourceGroup = new ResourceGroup("rg", new ResourceGroupArgs
-    {
-        Location = location,
-        ResourceGroupName = $"rg-azure-functions-{environment}"
-    });
+    var resourceGroup = new ResourceGroup(
+        "rg",
+        new ResourceGroupArgs
+        {
+            Location = location,
+            ResourceGroupName = $"rg-func-{environment}",
+        }
+    );
 
     // Create a storage account (required for Azure Functions)
-    var storageAccount = new StorageAccount("sa", new StorageAccountArgs
-    {
-        ResourceGroupName = resourceGroup.Name,
-        AccountName = $"safunc{environment}{System.Guid.NewGuid().ToString("N")[..8]}",
-        Location = location,
-        Sku = new Pulumi.AzureNative.Storage.Inputs.SkuArgs
+    var storageAccount = new StorageAccount(
+        "sa",
+        new StorageAccountArgs
         {
-            Name = SkuName.Standard_LRS
-        },
-        Kind = Pulumi.AzureNative.Storage.Kind.StorageV2
-    });
+            ResourceGroupName = resourceGroup.Name,
+            AccountName = $"st{environment}{System.Guid.NewGuid().ToString("N")[..8]}",
+            Location = location,
+            Sku = new Pulumi.AzureNative.Storage.Inputs.SkuArgs { Name = SkuName.Standard_LRS },
+            Kind = Pulumi.AzureNative.Storage.Kind.StorageV2,
+        }
+    );
 
     // Create Application Insights
-    var appInsights = new Component("ai", new ComponentArgs
-    {
-        ResourceGroupName = resourceGroup.Name,
-        ResourceName = $"ai-azure-functions-{environment}",
-        Location = location,
-        ApplicationType = ApplicationType.Web,
-        IngestionMode = IngestionMode.ApplicationInsights, // Fixed: Explicitly set to ApplicationInsights
-        Kind = "web"
-    });
+    var appInsights = new Component(
+        "ai",
+        new ComponentArgs
+        {
+            ResourceGroupName = resourceGroup.Name,
+            ResourceName = $"ai-func-{environment}",
+            Location = location,
+            ApplicationType = ApplicationType.Web,
+            IngestionMode = IngestionMode.ApplicationInsights, // Fixed: Explicitly set to ApplicationInsights
+            Kind = "web",
+        }
+    );
 
     // OPTION 1: Traditional Azure Functions (current approach)
     // Create an App Service Plan
-    var appServicePlan = new AppServicePlan("asp", new AppServicePlanArgs
-    {
-        ResourceGroupName = resourceGroup.Name,
-        Name = $"asp-azure-functions-{environment}",
-        Location = location,
-        Sku = new SkuDescriptionArgs
+    var appServicePlan = new AppServicePlan(
+        "asp",
+        new AppServicePlanArgs
         {
-            Name = "B1",  // Basic tier - cheapest paid option
-            Tier = "Basic"
-        },
-        Kind = "functionapp"
-    });
+            ResourceGroupName = resourceGroup.Name,
+            Name = $"asp-func-{environment}",
+            Location = location,
+            Sku = new SkuDescriptionArgs
+            {
+                Name = "B1", // Basic tier - cheapest paid option
+                Tier = "Basic",
+            },
+            Kind = "functionapp",
+        }
+    );
 
     // Create the Function App
-    var functionApp = new WebApp("func", new WebAppArgs
-    {
-        ResourceGroupName = resourceGroup.Name,
-        Name = $"func-azure-functions-{environment}-{System.Guid.NewGuid().ToString("N")[..8]}",
-        Location = location,
-        ServerFarmId = appServicePlan.Id,
-        Kind = "functionapp",
-        SiteConfig = new SiteConfigArgs
+    var functionApp = new WebApp(
+        "func",
+        new WebAppArgs
         {
-            AppSettings = new[]
+            ResourceGroupName = resourceGroup.Name,
+            Name = $"func-{environment}-{System.Guid.NewGuid().ToString("N")[..8]}",
+            Location = location,
+            ServerFarmId = appServicePlan.Id,
+            Kind = "functionapp",
+            SiteConfig = new SiteConfigArgs
             {
-                new NameValuePairArgs
+                AppSettings = new[]
                 {
-                    Name = "AzureWebJobsStorage",
-                    Value = Output.Tuple(resourceGroup.Name, storageAccount.Name).Apply(t =>
+                    new NameValuePairArgs
                     {
-                        var keys = ListStorageAccountKeys.Invoke(new ListStorageAccountKeysInvokeArgs
-                        {
-                            ResourceGroupName = t.Item1,
-                            AccountName = t.Item2
-                        });
-                        return keys.Apply(k => $"DefaultEndpointsProtocol=https;AccountName={t.Item2};AccountKey={k.Keys[0].Value};EndpointSuffix=core.windows.net");
-                    }).Apply(o => o)
+                        Name = "AzureWebJobsStorage",
+                        Value = Output
+                            .Tuple(resourceGroup.Name, storageAccount.Name)
+                            .Apply(t =>
+                            {
+                                var keys = ListStorageAccountKeys.Invoke(
+                                    new ListStorageAccountKeysInvokeArgs
+                                    {
+                                        ResourceGroupName = t.Item1,
+                                        AccountName = t.Item2,
+                                    }
+                                );
+                                return keys.Apply(k =>
+                                    $"DefaultEndpointsProtocol=https;AccountName={t.Item2};AccountKey={k.Keys[0].Value};EndpointSuffix=core.windows.net"
+                                );
+                            })
+                            .Apply(o => o),
+                    },
+                    new NameValuePairArgs { Name = "FUNCTIONS_EXTENSION_VERSION", Value = "~4" },
+                    new NameValuePairArgs
+                    {
+                        Name = "FUNCTIONS_WORKER_RUNTIME",
+                        Value = "dotnet-isolated",
+                    },
+                    new NameValuePairArgs
+                    {
+                        Name = "APPINSIGHTS_INSTRUMENTATIONKEY",
+                        Value = appInsights.InstrumentationKey,
+                    },
+                    new NameValuePairArgs
+                    {
+                        Name = "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                        Value = appInsights.ConnectionString,
+                    },
+                    // Custom application settings
+                    new NameValuePairArgs { Name = "WelcomeMessage", Value = welcomeMessage },
+                    new NameValuePairArgs { Name = "MaxRetries", Value = "3" },
+                    new NameValuePairArgs
+                    {
+                        Name = "ApiBaseUrl",
+                        Value = "https://api.example.com",
+                    },
+                    new NameValuePairArgs
+                    {
+                        Name = "DatabaseConnectionString",
+                        Value = "Server=localhost;Database=MyDb;Trusted_Connection=true;",
+                    },
+                    // Performance and reliability settings
+                    new NameValuePairArgs
+                    {
+                        Name = "WEBSITE_RUN_FROM_PACKAGE",
+                        Value = "1",
+                    },
+                    new NameValuePairArgs
+                    {
+                        Name = "WEBSITE_USE_PLACEHOLDER",
+                        Value = "0",
+                    },
+                    new NameValuePairArgs
+                    {
+                        Name = "WEBSITE_ENABLE_SYNC_UPDATE_SITE",
+                        Value = "true",
+                    },
                 },
-                new NameValuePairArgs
-                {
-                    Name = "FUNCTIONS_EXTENSION_VERSION",
-                    Value = "~4"
-                },
-                new NameValuePairArgs
-                {
-                    Name = "FUNCTIONS_WORKER_RUNTIME",
-                    Value = "dotnet-isolated"
-                },
-                new NameValuePairArgs
-                {
-                    Name = "APPINSIGHTS_INSTRUMENTATIONKEY",
-                    Value = appInsights.InstrumentationKey
-                },
-                new NameValuePairArgs
-                {
-                    Name = "APPLICATIONINSIGHTS_CONNECTION_STRING",
-                    Value = appInsights.ConnectionString
-                },
-                // Custom application settings
-                new NameValuePairArgs
-                {
-                    Name = "WelcomeMessage",
-                    Value = welcomeMessage
-                },
-                new NameValuePairArgs
-                {
-                    Name = "MaxRetries",
-                    Value = "3"
-                },
-                new NameValuePairArgs
-                {
-                    Name = "ApiBaseUrl",
-                    Value = "https://api.example.com"
-                },
-                new NameValuePairArgs
-                {
-                    Name = "DatabaseConnectionString",
-                    Value = "Server=localhost;Database=MyDb;Trusted_Connection=true;"
-                }
-            }
+                Use32BitWorkerProcess = false, // Enable 64-bit process
+                HealthCheckPath = "/api/ConfigHealth", // Enable health check monitoring
+            },
         }
-    });
+    );
 
     /* OPTION 2: Azure Container Apps (Alternative if quota issues persist)
     // Uncomment this section if you want to try Container Apps instead
@@ -260,6 +285,6 @@ return await Pulumi.Deployment.RunAsync(() =>
         ["storageAccountName"] = storageAccount.Name,
         ["appInsightsName"] = appInsights.Name,
         ["location"] = location,
-        ["environment"] = environment
+        ["environment"] = environment,
     };
 });
