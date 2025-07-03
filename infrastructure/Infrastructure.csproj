@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Pulumi" Version="3.96.0" />
-    <PackageReference Include="Pulumi.AzureNative" Version="2.74.0" />
+    <PackageReference Include="Pulumi" Version="3.84.0" />
+    <PackageReference Include="Pulumi.AzureNative" Version="2.34.0" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="src/**/*" />
